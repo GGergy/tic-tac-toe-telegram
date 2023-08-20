@@ -16,6 +16,10 @@ def start(message):
     markup.row(types.InlineKeyboardButton(text='Main menu📋', callback_data=call_out(handler='main', deleting=False)))
     if database.user(chat_id=message.chat.id):
         user, session = database.user(chat_id=message.chat.id, mode='w')
+        if user.room_id:
+            bot.delete_message(message.chat.id, message.id)
+            session.close()
+            return
         try:
             bot.delete_message(chat_id=message.chat.id, message_id=user.message_id)
         except telebot.apihelper.ApiTelegramException:
@@ -34,6 +38,9 @@ def start(message):
 
 @bot.callback_query_handler(lambda_generator('main'))
 def main_menu(call):
+    user = database.user(call.message.chat.id)
+    if user.room_id:
+        return
     markup = types.InlineKeyboardMarkup()
     markup.row(types.InlineKeyboardButton('Play🎮', callback_data=call_out(handler='play')))
     markup.row(types.InlineKeyboardButton('My profile🌐', callback_data=call_out(handler='profile')))
@@ -88,14 +95,27 @@ def play_menu(call):
 
 @bot.callback_query_handler(lambda_generator(handler='search'))
 def search(call):
+    user, session = database.user(call.message.chat.id, 'w')
+    if user.room_id:
+        return
+    user.room_id = 'processing'
+    session.commit()
     room = database.get_free_room()
     if room:
+        user.room_id = room.room_id
+        session.commit()
+        session.close()
         database.connect_to_room(room.room_id, call.message.chat.id)
         start_game(room.room_id, call)
         return
-    database.create_room(call.message.chat.id)
+    room_id = database.create_room(call.message.chat.id)
+    user.room_id = room_id
+    session.commit()
+    session.close()
+    markup = types.InlineKeyboardMarkup()
+    markup.row(types.InlineKeyboardButton('Cancel⛔', callback_data=call_out(handler='cancel_search')))
     bot.edit_message_text(message_id=call.message.id, chat_id=call.message.chat.id,
-                          text='Room created, wait for opponent')
+                          text='Room created, wait for opponent', reply_markup=markup)
 
 
 def start_game(room_id, call):
@@ -133,6 +153,39 @@ def make_move(call):
     elif move == 'placed':
         bot.answer_callback_query(call.id, "Сell is already occupied")
     else:
+        player1 = call.message.chat.id
+        player2 = room.get_opponent(player1)
+        winner = room.check_end()
+        if winner:
+            markup = types.InlineKeyboardMarkup()
+            markup.row(types.InlineKeyboardButton(text='Main menu📋', callback_data=call_out(handler='main',
+                                                                                            deleting=False)))
+            user, session1 = database.user(player1, 'w')
+            user2, session2 = database.user(player2, 'w')
+            messages = ('You win! Elo +10', 'You loose((( Elo -5')
+            if winner == player1:
+                user.elo += 10
+                user2.elo -= (5 if user2.elo else 0)
+            elif winner == player2:
+                user.elo -= (5 if user.elo else 0)
+                user2.elo += 10
+                messages = messages[::-1]
+            else:
+                messages = ('Draw!', 'Draw!')
+            user.room_id = 0
+            user2.room_id = 0
+            database.close_room(room.room_id)
+            bot.edit_message_text(text=messages[0], reply_markup=markup, chat_id=player1, message_id=call.message.id)
+            bot.edit_message_text(text=messages[1], reply_markup=markup, chat_id=player2, message_id=user2.message_id)
+            session.close()
+            session1.commit()
+            session1.close()
+            session2.commit()
+            session2.close()
+            return
+        player1_name = bot.get_chat_member(chat_id=player1, user_id=player1).user.full_name
+        player2_name = bot.get_chat_member(chat_id=player2, user_id=player2).user.full_name
+        user2 = database.user(player2)
         markup = types.InlineKeyboardMarkup()
         markup.row(*[types.InlineKeyboardButton(board[0][i],
                                                 callback_data=call_out(handler='move', room=data.room,
@@ -143,11 +196,6 @@ def make_move(call):
         markup.row(*[types.InlineKeyboardButton(board[2][i],
                                                 callback_data=call_out(handler='move', room=data.room,
                                                                        position=(2, i))) for i in range(3)])
-        player1 = call.message.chat.id
-        player2 = room.get_opponent(player1)
-        player1_name = bot.get_chat_member(chat_id=player1, user_id=player1).user.full_name
-        player2_name = bot.get_chat_member(chat_id=player2, user_id=player2).user.full_name
-        user2 = database.user(player2)
         if move == player1:
             turns = ('Your turn!', "Opponent's turn")
         else:
@@ -160,7 +208,21 @@ def make_move(call):
     session.close()
 
 
+@bot.callback_query_handler(lambda_generator('cancel_search'))
+def cancel_searching(call):
+    user, session = database.user(call.message.chat.id, 'w')
+    database.close_room(user.room_id)
+    user.room_id = 0
+    session.commit()
+    session.close()
+    markup = types.InlineKeyboardMarkup()
+    markup.row(types.InlineKeyboardButton(text='Main menu📋', callback_data=call_out(handler='main', deleting=False)))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.id, text="Game canceled",
+                          reply_markup=markup)
+
+
 def main():
+    database.close_room()
     print('successful initialize')
     bot.infinity_polling()
 

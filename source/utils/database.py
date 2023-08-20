@@ -2,7 +2,7 @@ import random
 
 import sqlalchemy.orm
 from .user import User
-from .room import Room
+from .room import Room, RoomTypes
 from .connection import connect
 
 
@@ -28,9 +28,9 @@ def user(chat_id, mode='r') -> (User, sqlalchemy.orm.session.Session):
     return usr, session
 
 
-def create_room(user_id, room_opened=True):
+def create_room(user_id, room_type=RoomTypes.OPENED):
     rm = Room()
-    rm.opened = room_opened
+    rm.type = room_type
     site = random.randint(1, 2)
     if site == 1:
         rm.cross_site_id = user_id
@@ -39,12 +39,15 @@ def create_room(user_id, room_opened=True):
     session = generator()
     session.add(rm)
     session.commit()
+    rmid = rm.room_id
     session.close()
+    return rmid
 
 
 def get_free_room():
     session = generator()
-    rooms = [rm for rm in session.query(Room).all() if (rm.zero_site_id == 0 or rm.cross_site_id == 0) and rm.opened]
+    rooms = [rm for rm in session.query(Room).all() if (rm.zero_site_id == 0 or rm.cross_site_id == 0)
+             and rm.type == RoomTypes.OPENED]
     session.close()
     return rooms[0] if rooms else False
 
@@ -64,3 +67,15 @@ def room(room_id, mode='r') -> (Room, sqlalchemy.orm.session.Session):
         session.close()
         return rm
     return rm, session
+
+
+def close_room(room_id=None):
+    session = generator()
+    if room_id:
+        session.query(Room).filter(Room.room_id == room_id).delete()
+    else:
+        for usr in session.query(User).all():
+            usr.room_id = 0
+        session.query(Room).delete()
+    session.commit()
+    session.close()
