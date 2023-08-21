@@ -8,6 +8,9 @@ class RoomTypes:
     OPENED = '1'
     CLOSED = '2'
     LOCAL = '3'
+    ENDING = '4'
+    PLAYING = '5'
+    WAITING = '6'
 
 
 class Room(SqlAlchemyBase):
@@ -40,7 +43,7 @@ class Room(SqlAlchemyBase):
             self.board = json.dumps(board)
             return self.zero_site_id
         elif user_id == self.zero_site_id and moves % 2 == 1:
-            board[position[0]][position[1]] = '🟢'
+            board[position[0]][position[1]] = '⭕'
             self.board = json.dumps(board)
             return self.cross_site_id
         return False
@@ -52,22 +55,22 @@ class Room(SqlAlchemyBase):
         board = json.loads(self.board)
         for row in range(3):
             if ''.join(board[row]).count('❌') == 3:
-                return self.cross_site_id
-            if ''.join(board[row]).count('🟢') == 3:
-                return self.zero_site_id
+                return self.cross_site_id, [(row, i) for i in range(3)]
+            if ''.join(board[row]).count('⭕') == 3:
+                return self.zero_site_id, [(row, i) for i in range(3)]
         for col in range(3):
             if f"{board[0][col]}{board[1][col]}{board[2][col]}".count('❌') == 3:
-                return self.cross_site_id
-            if f"{board[0][col]}{board[1][col]}{board[2][col]}".count('🟢') == 3:
-                return self.zero_site_id
+                return self.cross_site_id, [(i, col) for i in range(3)]
+            if f"{board[0][col]}{board[1][col]}{board[2][col]}".count('⭕') == 3:
+                return self.zero_site_id, [(i, col) for i in range(3)]
         if f"{board[0][0]}{board[1][1]}{board[2][2]}".count('❌') == 3:
-            return self.cross_site_id
-        if f"{board[0][0]}{board[1][1]}{board[2][2]}".count('🟢') == 3:
-            return self.zero_site_id
+            return self.cross_site_id, [(i, i) for i in range(3)]
+        if f"{board[0][0]}{board[1][1]}{board[2][2]}".count('⭕') == 3:
+            return self.zero_site_id, [(i, i) for i in range(3)]
         if f"{board[0][2]}{board[1][1]}{board[2][0]}".count('❌') == 3:
-            return self.cross_site_id
-        if f"{board[0][2]}{board[1][1]}{board[2][0]}".count('🟢') == 3:
-            return self.zero_site_id
+            return self.cross_site_id, [(i, 2 - i) for i in range(3)]
+        if f"{board[0][2]}{board[1][1]}{board[2][0]}".count('⭕') == 3:
+            return self.zero_site_id, [(i, 2 - i) for i in range(3)]
         if self.get_moves() == 9:
-            return 'draw'
+            return 'draw', ()
         return False

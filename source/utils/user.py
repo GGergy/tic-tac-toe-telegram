@@ -12,6 +12,7 @@ class User(SqlAlchemyBase):
     room_id = sqlalchemy.Column(sqlalchemy.Integer, default=0)
     matches_won = sqlalchemy.Column(sqlalchemy.Integer, default=0)
     matches_lost = sqlalchemy.Column(sqlalchemy.Integer, default=0)
+    matches_played = sqlalchemy.Column(sqlalchemy.Integer, default=0)
     following = sqlalchemy.Column(sqlalchemy.String, default='[]')
     followers = sqlalchemy.Column(sqlalchemy.String, default='[]')
 

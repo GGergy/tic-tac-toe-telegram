@@ -1,9 +1,11 @@
 import json
+import time
 
 import telebot
 from telebot import types
 from utils import config, database
 from utils.callback_io import call_in, call_out, lambda_generator
+from utils.room import RoomTypes
 
 
 bot = telebot.TeleBot(token=config.TOKEN)
@@ -61,7 +63,7 @@ def main_menu(call):
 def profile(call):
     markup = types.InlineKeyboardMarkup()
     markup.row(types.InlineKeyboardButton('Followers🤍', callback_data=call_out(handler='followers')))
-    markup.row(types.InlineKeyboardButton('Following❤️', callback_data=call_out(handler='followers')))
+    markup.row(types.InlineKeyboardButton('Following❤️', callback_data=call_out(handler='following')))
     markup.row(types.InlineKeyboardButton('Friends🤝', callback_data=call_out(handler='friends')))
     markup.row(types.InlineKeyboardButton('World rating🌍', callback_data=call_out('world_rank')))
     markup.row(types.InlineKeyboardButton('back🔙', callback_data=call_out(handler='main', deleting=True)))
@@ -72,10 +74,10 @@ def profile(call):
                      '-stima-vopros-pinterest-1.png')
     name = bot.get_chat_member(chat_id=call.message.chat.id, user_id=call.message.chat.id).user.full_name
     user, session = database.user(chat_id=call.message.chat.id, mode='w')
-    mid = bot.send_photo(chat_id=call.message.chat.id, photo=photo_url,
-                         caption=f'{name}\nMatches won - {user.matches_won}\nMatches lost - {user.matches_lost}'
-                                 f'\nElo - {user.elo}\nFollowers - {len(user.get_followers())}\nFollowing -'
-                                 f' {len(user.get_following())}', reply_markup=markup).id
+    mid = bot.send_photo(chat_id=call.message.chat.id, photo=photo_url, reply_markup=markup,
+                         caption=f'{name}\nMatches played - {user.matches_played}\nMatches won - {user.matches_won}\n'
+                                 f'Matches lost - {user.matches_lost}\nElo - {user.elo}\nFollowers -'
+                                 f' {len(user.get_followers())}\nFollowing - {len(user.get_following())}').id
     user.message_id = mid
     bot.delete_message(chat_id=call.message.chat.id, message_id=call.message.id)
     session.commit()
@@ -126,7 +128,8 @@ def start_game(room_id, call):
                                                                         position=(1, i))) for i in range(3)])
     markup.row(*[types.InlineKeyboardButton('⬜', callback_data=call_out(handler='move', room=room_id,
                                                                         position=(2, i))) for i in range(3)])
-    room = database.room(room_id)
+    room, session = database.room(room_id, 'w')
+    room.type = RoomTypes.PLAYING
     player1 = call.message.chat.id
     player2 = room.get_opponent(player1)
     player1_name = bot.get_chat_member(chat_id=player1, user_id=player1).user.full_name
@@ -140,12 +143,18 @@ def start_game(room_id, call):
                           message_id=call.message.id)
     bot.edit_message_text(text=f'Your opponent - {player1_name}. {turns[1]}', reply_markup=markup, chat_id=player2,
                           message_id=user2.message_id)
+    session.commit()
+    session.close()
 
 
 @bot.callback_query_handler(lambda_generator(handler='move'))
 def make_move(call):
     data = call_in(call.data)
     room, session = database.room(data.room, 'w')
+    if room.type == RoomTypes.ENDING:
+        bot.answer_callback_query(callback_query_id=call.id, text='Game ended')
+        session.close()
+        return
     move = room.check_move(user_id=call.message.chat.id, position=data.position)
     board = json.loads(room.board)
     if not move:
@@ -157,24 +166,32 @@ def make_move(call):
         player2 = room.get_opponent(player1)
         winner = room.check_end()
         if winner:
+            winner, cells = winner
+            room.type = RoomTypes.ENDING
+            session.commit()
             markup = types.InlineKeyboardMarkup()
-            markup.row(types.InlineKeyboardButton(text='Main menu📋', callback_data=call_out(handler='main',
-                                                                                            deleting=False)))
+            markup.row(types.InlineKeyboardButton(text='Play again🔄', callback_data=call_out(handler='restart_game')))
+            markup.row(types.InlineKeyboardButton(text='Cancel⛔', callback_data=call_out(handler='stop_game')))
             user, session1 = database.user(player1, 'w')
             user2, session2 = database.user(player2, 'w')
             messages = ('You win! Elo +10', 'You loose((( Elo -5')
+            user.matches_played += 1
+            user2.matches_played += 1
             if winner == player1:
                 user.elo += 10
                 user2.elo -= (5 if user2.elo else 0)
+                user.matches_won += 1
+                user2.matches_lost += 1
             elif winner == player2:
                 user.elo -= (5 if user.elo else 0)
                 user2.elo += 10
+                user.matches_lost += 1
+                user2.matches_won += 1
                 messages = messages[::-1]
             else:
                 messages = ('Draw!', 'Draw!')
-            user.room_id = 0
-            user2.room_id = 0
-            database.close_room(room.room_id)
+            if cells:
+                end_game(cells, user, user2, room, messages)
             bot.edit_message_text(text=messages[0], reply_markup=markup, chat_id=player1, message_id=call.message.id)
             bot.edit_message_text(text=messages[1], reply_markup=markup, chat_id=player2, message_id=user2.message_id)
             session.close()
@@ -219,6 +236,71 @@ def cancel_searching(call):
     markup.row(types.InlineKeyboardButton(text='Main menu📋', callback_data=call_out(handler='main', deleting=False)))
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.id, text="Game canceled",
                           reply_markup=markup)
+
+
+def end_game(cells, user1, user2, room, messages):
+    board = json.loads(room.board)
+    markup = types.InlineKeyboardMarkup()
+    markup.row(*[types.InlineKeyboardButton(board[0][i], callback_data='asd') for i in range(3)])
+    markup.row(*[types.InlineKeyboardButton(board[1][i], callback_data='asd') for i in range(3)])
+    markup.row(*[types.InlineKeyboardButton(board[2][i], callback_data='asd') for i in range(3)])
+    for row, col in cells:
+        markup.keyboard[row][col] = types.InlineKeyboardButton("🔥", callback_data="asd")
+        bot.edit_message_text(text=messages[0], reply_markup=markup, chat_id=user1.chat_id, message_id=user1.message_id)
+        bot.edit_message_text(text=messages[1], reply_markup=markup, chat_id=user2.chat_id, message_id=user2.message_id)
+        time.sleep(0.3)
+    time.sleep(0.5)
+
+
+@bot.callback_query_handler(lambda_generator('restart_game'))
+def play_again(call):
+    user = database.user(call.message.chat.id)
+    room, session = database.room(user.room_id, 'w')
+    if not room:
+        session.close()
+        return
+    if room.type == RoomTypes.WAITING:
+        room.board = json.dumps([['⬜', '⬜', '⬜'], ['⬜', '⬜', '⬜'], ['⬜', '⬜', '⬜']])
+        room.zero_site_id, room.cross_site_id = room.cross_site_id, room.zero_site_id
+        session.commit()
+        start_game(room.room_id, call)
+        session.close()
+        return
+    room.type = RoomTypes.WAITING
+    session.commit()
+    markup = types.InlineKeyboardMarkup()
+    markup.row(types.InlineKeyboardButton(text='Cancel⛔', callback_data=call_out(handler='stop_game')))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.id, text="Waiting for your opponent...",
+                          reply_markup=markup)
+    session.close()
+
+
+@bot.callback_query_handler(lambda_generator('stop_game'))
+def stop_game(call):
+    user, sess = database.user(call.message.chat.id, 'w')
+    room = database.room(user.room_id)
+    if not room:
+        sess.close()
+        return
+    user2, sess2 = database.user(room.get_opponent(user.chat_id), 'w')
+    user.room_id = 0
+    user2.room_id = 0
+    database.close_room(room.room_id)
+    markup = types.InlineKeyboardMarkup()
+    markup.row(types.InlineKeyboardButton(text='Main menu📋', callback_data=call_out(handler='main', deleting=False)))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.id, text="Room closed",
+                          reply_markup=markup)
+    bot.edit_message_text(chat_id=user2.chat_id, message_id=user2.message_id, text="Room closed",
+                          reply_markup=markup)
+    sess.commit()
+    sess.close()
+    sess2.commit()
+    sess2.close()
+
+
+@bot.message_handler(content_types=['text', 'audio', 'photo', 'video', 'media', 'file', 'voice', 'video_note'])
+def deleter(message):
+    bot.delete_message(message.chat.id, message.id)
 
 
 def main():

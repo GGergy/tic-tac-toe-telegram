@@ -46,8 +46,7 @@ def create_room(user_id, room_type=RoomTypes.OPENED):
 
 def get_free_room():
     session = generator()
-    rooms = [rm for rm in session.query(Room).all() if (rm.zero_site_id == 0 or rm.cross_site_id == 0)
-             and rm.type == RoomTypes.OPENED]
+    rooms = [rm for rm in session.query(Room).all() if rm.type == RoomTypes.OPENED]
     session.close()
     return rooms[0] if rooms else False
 
