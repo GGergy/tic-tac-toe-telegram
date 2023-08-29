@@ -1,4 +1,6 @@
 import json
+import random
+import string
 
 import sqlalchemy
 from .connection import SqlAlchemyBase
@@ -27,6 +29,18 @@ class Room(SqlAlchemyBase):
             self.cross_site_id = user_id
         else:
             self.zero_site_id = user_id
+
+    def generate_password(self):
+        password = ''
+        for _ in range(random.randint(10, 15)):
+            if random.randint(1, 2) == 1:
+                symb = random.choice(string.ascii_letters)
+                if random.randint(1, 2) == 1:
+                    symb = symb.upper()
+            else:
+                symb = random.choice(string.digits)
+            password += symb
+        self.type = password
 
     def get_opponent(self, user_id):
         if self.cross_site_id == user_id:

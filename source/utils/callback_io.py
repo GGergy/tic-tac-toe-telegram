@@ -5,10 +5,10 @@ class CallbackDataClass:
     def __init__(self, handler, **kwargs):
         self.handler = handler
         for key, item in kwargs.items():
-            if isinstance(item, str):
-                exec(f"self.{key} = '{item}'")
-            else:
-                exec(f"self.{key} = {item}")
+            self.__setattr__(key, item)
+
+    def __getattr__(self, item):
+        return self.__dict__.get(item, None)
 
     def __repr__(self):
         return "Callback data: " + ", ".join([f"{key} - {item}" for key, item in self.__dict__.items()])

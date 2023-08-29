@@ -31,6 +31,8 @@ def user(chat_id, mode='r') -> (User, sqlalchemy.orm.session.Session):
 def create_room(user_id, room_type=RoomTypes.OPENED):
     rm = Room()
     rm.type = room_type
+    if room_type == RoomTypes.CLOSED:
+        rm.generate_password()
     site = random.randint(1, 2)
     if site == 1:
         rm.cross_site_id = user_id
@@ -78,3 +80,10 @@ def close_room(room_id=None):
         session.query(Room).delete()
     session.commit()
     session.close()
+
+
+def get_world_rating():
+    session = generator()
+    users = session.query(User).order_by(-User.elo)[:30]
+    session.close()
+    return [(usr.chat_id, usr.elo) for usr in users]
